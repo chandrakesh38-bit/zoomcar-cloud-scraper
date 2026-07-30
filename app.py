@@ -7,7 +7,7 @@ from playwright.sync_api import sync_playwright
 app = Flask(__name__)
 
 # Standalone API Endpoint
-WEB_APP_URL = "https://script.google.com/macros/s/AKfycbQ6GwU4o9l4xsBykQn8GsV8RtFYGHfOvGihBSvfMV8W9KR8K7a2ntYbOY5o7ZMuzhB8A/exec"
+WEB_APP_URL = "https://script.google.com/macros/s/AKfycbx9lWNCjUPqCpQwStvioWbfmqb6os25E8iRlXKFfWSrJXJyQGwXaWmQ9UREjUFgKN8D/exec"
 
 def parse_distance(card_text):
     match = re.search(r'([\d\.]+)\s*km', card_text, re.IGNORECASE)

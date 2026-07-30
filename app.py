@@ -6,7 +6,7 @@ from playwright.sync_api import sync_playwright
 
 app = Flask(__name__)
 
-# Standalone API Endpoint
+# Standalone Google Apps Script Web App URL
 WEB_APP_URL = "https://script.google.com/macros/s/AKfycbx9lWNCjUPqCpQwStvioWbfmqb6os25E8iRlXKFfWSrJXJyQGwXaWmQ9UREjUFgKN8D/exec"
 
 def parse_distance(card_text):
@@ -18,15 +18,18 @@ def parse_price(card_text):
     return int(match.group(1).replace(',', '')) if match else 0
 
 def fetch_and_update():
-    # 1. Fetch query from Google Sheet
-    res = requests.get(WEB_APP_URL)
-    data = res.json()
-    
-    pickup_date = data.get('pickupDate', '29-Aug-2026')
-    pickup_time = data.get('pickupTime', '08:00')
-    drop_date = data.get('dropDate', '30-Aug-2026')
-    drop_time = data.get('dropTime', '08:00')
-    car_name = data.get('carName', 'Punch').strip()
+    # 1. Fetch query from Google Sheet (with fallback safety)
+    try:
+        res = requests.get(WEB_APP_URL, timeout=10)
+        data = res.json()
+    except Exception as e:
+        data = {}
+
+    pickup_date = data.get('pickupDate') if isinstance(data, dict) and data.get('pickupDate') else '29-Aug-2026'
+    pickup_time = data.get('pickupTime') if isinstance(data, dict) and data.get('pickupTime') else '08:00'
+    drop_date = data.get('dropDate') if isinstance(data, dict) and data.get('dropDate') else '30-Aug-2026'
+    drop_time = data.get('dropTime') if isinstance(data, dict) and data.get('dropTime') else '08:00'
+    car_name = (data.get('carName') if isinstance(data, dict) and data.get('carName') else 'Punch').strip()
 
     zoom_url = f"https://www.zoomcar.com/in/mumbai/search?pickup_date={pickup_date}&pickup_time={pickup_time}&drop_date={drop_date}&drop_time={drop_time}"
 

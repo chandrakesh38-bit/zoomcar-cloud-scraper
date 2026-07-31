@@ -115,7 +115,18 @@ def run_scraper_attempt(pickup_date, pickup_time, drop_date, drop_time, target_c
             page.route("**/*.{png,jpg,jpeg,svg,webp,gif,woff,woff2}", lambda route: route.abort())
 
             page.goto(zoom_url, wait_until="domcontentloaded", timeout=40000)
-            page.wait_for_timeout(12000)
+
+            # Wait for network activity to settle instead of a blind fixed sleep.
+            # This avoids closing the browser while a response body is still
+            # being read (which caused TargetClosedError).
+            try:
+                page.wait_for_load_state("networkidle", timeout=15000)
+            except Exception:
+                print("[WARN] networkidle wait timed out, continuing anyway")
+
+            # Small buffer so any in-flight response.json() calls in
+            # handle_response finish before we tear down the browser.
+            page.wait_for_timeout(2000)
 
             context.close()
             browser.close()

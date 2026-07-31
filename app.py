@@ -2,13 +2,14 @@ import os
 import json
 import requests
 import threading
+import traceback
 from datetime import datetime
 from flask import Flask, jsonify
 from playwright.sync_api import sync_playwright
 
 app = Flask(__name__)
 
-WEB_APP_URL = "https://script.google.com/macros/s/AKfycbx9lWNCjUPqCpQwStvioWbfmqb6os25E8iRlXKFfWSrJXJyQGwXaWmQ9UREjUFgKN8D/exec"
+WEB_APP_URL = "https://script.google.com/macros/s/AKfycbXQ6GwU4o9l4xsBykQn8GsV8RtFYGHfOvGihBSvfMV8W9KR8K7a2ntYbOY5o7ZMuzhB8A/exec"
 
 def date_to_epoch_ms(date_str, time_str):
     """
@@ -20,6 +21,7 @@ def date_to_epoch_ms(date_str, time_str):
         return int(dt_obj.timestamp() * 1000)
     except Exception as e:
         print(f"[ERROR] Failed to convert date '{date_str} {time_str}': {e}")
+        traceback.print_exc()
         raise e
 
 def parse_exact_zoomcar_json(json_data, target_car):
@@ -31,7 +33,6 @@ def parse_exact_zoomcar_json(json_data, target_car):
     """
     extracted_vehicles = []
     
-    # Helper recursive walker to find objects with 'car_info' and 'amount'
     def find_car_objects(data):
         if isinstance(data, dict):
             if "car_info" in data or "amount" in data:
@@ -47,42 +48,37 @@ def parse_exact_zoomcar_json(json_data, target_car):
             car_info = item.get("car_info", {})
             amount = item.get("amount", {})
 
-            # 1. Extract Car Name (car_info.name)
             car_name = str(car_info.get("name", "")).strip().lower()
             if not car_name:
                 continue
 
-            # Check if this object matches requested target car (Nexon or Punch)
             if target_car not in car_name:
                 continue
 
-            # 2. Extract Distance (car_info.location_data.distance)
             location_data = car_info.get("location_data", {})
             distance = float(location_data.get("distance", 999.0))
 
-            # 3. Extract Rental Price (amount.trip_fare_after_discounts)
             trip_fare = amount.get("trip_fare_after_discounts")
-            
-            # Fallback check if trip_fare is directly inside amount or integer-formatted
             if trip_fare is not None:
                 rental_price = int(float(trip_fare))
-                
                 if rental_price > 0:
                     extracted_vehicles.append({
                         "model": car_info.get("name", target_car.title()),
                         "distance": distance,
                         "price": rental_price
                     })
-        except Exception as err:
-            print(f"[ERROR] Error parsing JSON object node: {err}")
+        except Exception:
+            traceback.print_exc()
 
     return extracted_vehicles
 
 def run_scraper_attempt(pickup_date, pickup_time, drop_date, drop_time, target_car):
     """
-    Executes Playwright session, intercepts API responses, and parses strictly
-    by verified DevTools field schema.
+    Executes Playwright session, intercepts API responses, and waits properly 
+    for Zoomcar background responses to complete.
     """
+    print("========== Playwright STARTED ==========")
+    
     start_ms = date_to_epoch_ms(pickup_date, pickup_time)
     end_ms = date_to_epoch_ms(drop_date, drop_time)
 
@@ -104,8 +100,8 @@ def run_scraper_attempt(pickup_date, pickup_time, drop_date, drop_time, target_c
                     found_cars = parse_exact_zoomcar_json(json_data, target_car)
                     if found_cars:
                         intercepted_vehicles.extend(found_cars)
-        except Exception as e:
-            print(f"[ERROR] Response handler exception on {response.url}: {e}")
+        except Exception:
+            traceback.print_exc()
 
     browser = None
     context = None
@@ -125,24 +121,21 @@ def run_scraper_attempt(pickup_date, pickup_time, drop_date, drop_time, target_c
 
             page.goto(zoom_url, wait_until="domcontentloaded", timeout=40000)
 
-            # Event-based wait for network activity to settle
-            try:
-                page.wait_for_load_state("networkidle", timeout=8000)
-            except Exception as e:
-                print(f"[WARN] Network idle wait timed out: {e}")
+            # Explicit wait of 12 seconds to capture slow background API requests
+            page.wait_for_timeout(12000)
 
             context.close()
             browser.close()
 
-    except Exception as e:
-        print(f"[ERROR] Playwright session exception: {e}")
+    except Exception:
+        print("[ERROR] Playwright session exception caught:")
+        traceback.print_exc()
         if context:
             try: context.close()
             except: pass
         if browser:
             try: browser.close()
             except: pass
-        raise e
 
     return intercepted_vehicles
 
@@ -151,13 +144,14 @@ def fetch_and_update():
     Main orchestrator: Reads Apps Script request, fetches prices via exact JSON schema,
     picks nearest car, and posts price back to Google Sheet.
     """
-    print("\n=================== [NEW SCRAPE JOB - DEVTOOLS SCHEMA] ===================")
+    print("\n========== fetch_and_update STARTED ==========")
     try:
         res = requests.get(WEB_APP_URL, timeout=10)
         data = res.json()
         print(f"[INFO] Parameters from Google Sheet: {data}")
-    except Exception as e:
-        print(f"[ERROR] Failed to fetch parameters from Google Sheet API: {e}")
+    except Exception:
+        print("[ERROR] Failed to fetch parameters from Google Sheet API:")
+        traceback.print_exc()
         data = {}
 
     pickup_date = data.get('pickupDate') if isinstance(data, dict) and data.get('pickupDate') else '12-Sep-2026'
@@ -181,22 +175,23 @@ def fetch_and_update():
     try:
         print(f"[INFO] Attempt 1 for target model: '{target_car.upper()}'...")
         found_vehicles = run_scraper_attempt(pickup_date, pickup_time, drop_date, drop_time, target_car)
-    except Exception as err1:
-        print(f"[ERROR] Attempt 1 failed: {err1}")
+    except Exception:
+        print("[ERROR] Attempt 1 failed:")
+        traceback.print_exc()
 
     # Retry Once if empty
     if not found_vehicles:
         print("[WARN] Retrying... Attempt 2...")
         try:
             found_vehicles = run_scraper_attempt(pickup_date, pickup_time, drop_date, drop_time, target_car)
-        except Exception as err2:
-            print(f"[ERROR] Attempt 2 failed: {err2}")
+        except Exception:
+            print("[ERROR] Attempt 2 failed:")
+            traceback.print_exc()
 
     print(f"[INFO] Total '{target_car.upper()}' cars matched: {len(found_vehicles)}")
 
     selected_price = 0
     if found_vehicles:
-        # Sort by minimum distance
         found_vehicles.sort(key=lambda x: x["distance"])
         best_match = found_vehicles[0]
         selected_price = best_match["price"]
@@ -209,7 +204,6 @@ def fetch_and_update():
     else:
         print(f"[ERROR] No '{target_car.upper()}' cars found in API payloads.")
 
-    # Post exact price back to Google Sheet
     post_data = {
         "zoomcar_rate": selected_price,
         "revv_rate": "Not Found",
@@ -218,8 +212,9 @@ def fetch_and_update():
     try:
         response = requests.post(WEB_APP_URL, json=post_data, timeout=10)
         print(f"[SUCCESS] Updated Google Sheet via Webhook. Status code: {response.status_code}")
-    except Exception as post_err:
-        print(f"[ERROR] Failed to post result back to Google Sheet: {post_err}")
+    except Exception:
+        print("[ERROR] Failed to post result back to Google Sheet:")
+        traceback.print_exc()
 
 @app.route('/', methods=['GET'])
 def health_check():

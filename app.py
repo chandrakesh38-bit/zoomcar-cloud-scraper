@@ -10,12 +10,19 @@ app = Flask(__name__)
 WEB_APP_URL = "https://script.google.com/macros/s/AKfycbXQ6GwU4o9l4xsBykQn8GsV8RtFYGHfOvGihBSvfMV8W9KR8K7a2ntYbOY5o7ZMuzhB8A/exec"
 
 def parse_distance(card_text):
-    match = re.search(r'([\d\.]+)\s*km', card_text, re.IGNORECASE)
+    match = re.search(r'([\d\.]+)\s*km\s*away', card_text, re.IGNORECASE)
     return float(match.group(1)) if match else 999.0
 
-def parse_price(card_text):
-    match = re.search(r'₹\s*([\d,]+)', card_text)
-    return int(match.group(1).replace(',', '')) if match else 0
+def parse_total_price(card_text):
+    # Match total price like ₹2,976 or ₹2544 before "excluding fees" or "total"
+    match = re.search(r'₹\s*([\d,]+)\s*(?:excluding\s*fees|total)', card_text, re.IGNORECASE)
+    if match:
+        return int(match.group(1).replace(',', ''))
+    
+    # Fallback: Find largest ₹ amount in card text (total is always higher than per hr rate)
+    all_prices = re.findall(r'₹\s*([\d,]+)', card_text)
+    valid_prices = [int(p.replace(',', '')) for p in all_prices if int(p.replace(',', '')) > 500]
+    return max(valid_prices) if valid_prices else 0
 
 def fetch_and_update():
     try:
@@ -24,9 +31,9 @@ def fetch_and_update():
     except Exception as e:
         data = {}
 
-    pickup_date = data.get('pickupDate') if isinstance(data, dict) and data.get('pickupDate') else '29-Aug-2026'
+    pickup_date = data.get('pickupDate') if isinstance(data, dict) and data.get('pickupDate') else '12-Sep-2026'
     pickup_time = data.get('pickupTime') if isinstance(data, dict) and data.get('pickupTime') else '08:00'
-    drop_date = data.get('dropDate') if isinstance(data, dict) and data.get('dropDate') else '30-Aug-2026'
+    drop_date = data.get('dropDate') if isinstance(data, dict) and data.get('dropDate') else '13-Sep-2026'
     drop_time = data.get('dropTime') if isinstance(data, dict) and data.get('dropTime') else '08:00'
     car_name = (data.get('carName') if isinstance(data, dict) and data.get('carName') else 'Punch').strip()
 
@@ -41,14 +48,13 @@ def fetch_and_update():
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
                     '--disable-dev-shm-usage',
-                    '--disable-gpu',
-                    '--single-process'
+                    '--disable-gpu'
                 ]
             )
             context = browser.new_context()
             page = context.new_page()
             page.goto(zoom_url, timeout=60000)
-            page.wait_for_timeout(4000)
+            page.wait_for_timeout(5000)
             
             cards = page.query_selector_all("div[class*='component-car-item'], div[class*='car-card'], div[class*='item']")
             if not cards:
@@ -58,8 +64,8 @@ def fetch_and_update():
                 text = card.inner_text()
                 if car_name.lower() in text.lower() and '₹' in text:
                     dist = parse_distance(text)
-                    price = parse_price(text)
-                    if price > 0:
+                    price = parse_total_price(text)
+                    if price > 500:  # Filters out hourly rates
                         matching_cars.append({"distance": dist, "price": price})
             
             browser.close()

@@ -145,13 +145,16 @@ def fetch_and_update():
     picks nearest car, and posts price back to Google Sheet.
     """
     print("\n========== fetch_and_update STARTED ==========")
-    try:
-        res = requests.get(WEB_APP_URL, timeout=10)
-        data = res.json()
+try:
+        res = requests.get(WEB_APP_URL, timeout=15)
+        try:
+            data = res.json()
+        except Exception:
+            print(f"[WARN] Non-JSON response received: {res.text[:200]}")
+            data = {}
         print(f"[INFO] Parameters from Google Sheet: {data}")
-    except Exception:
-        print("[ERROR] Failed to fetch parameters from Google Sheet API:")
-        traceback.print_exc()
+    except Exception as e:
+        print(f"[ERROR] Failed to fetch parameters: {e}")
         data = {}
 
     pickup_date = data.get('pickupDate') if isinstance(data, dict) and data.get('pickupDate') else '12-Sep-2026'

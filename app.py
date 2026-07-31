@@ -13,17 +13,6 @@ def parse_distance(card_text):
     match = re.search(r'([\d\.]+)\s*km\s*away', card_text, re.IGNORECASE)
     return float(match.group(1)) if match else 999.0
 
-def parse_total_price(card_text):
-    # Match total price like ₹2,976 or ₹2544 before "excluding fees" or "total"
-    match = re.search(r'₹\s*([\d,]+)\s*(?:excluding\s*fees|total)', card_text, re.IGNORECASE)
-    if match:
-        return int(match.group(1).replace(',', ''))
-    
-    # Fallback: Find largest ₹ amount in card text (total is always higher than per hr rate)
-    all_prices = re.findall(r'₹\s*([\d,]+)', card_text)
-    valid_prices = [int(p.replace(',', '')) for p in all_prices if int(p.replace(',', '')) > 500]
-    return max(valid_prices) if valid_prices else 0
-
 def fetch_and_update():
     try:
         res = requests.get(WEB_APP_URL, timeout=10)
@@ -39,43 +28,55 @@ def fetch_and_update():
 
     zoom_url = f"https://www.zoomcar.com/in/mumbai/search?pickup_date={pickup_date}&pickup_time={pickup_time}&drop_date={drop_date}&drop_time={drop_time}"
 
-    matching_cars = []
+    selected_price = 0
+
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(
                 headless=True,
-                args=[
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-gpu'
-                ]
+                args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
             )
             context = browser.new_context()
             page = context.new_page()
             page.goto(zoom_url, timeout=60000)
             page.wait_for_timeout(5000)
+
+            # Get all car cards
+            cards = page.query_selector_all("div[class*='component-car-item'], div[class*='car-card']")
             
-            cards = page.query_selector_all("div[class*='component-car-item'], div[class*='car-card'], div[class*='item']")
-            if not cards:
-                cards = page.query_selector_all("div")
+            nearest_card = None
+            min_dist = 999.0
 
             for card in cards:
                 text = card.inner_text()
-                if car_name.lower() in text.lower() and '₹' in text:
+                if car_name.lower() in text.lower():
                     dist = parse_distance(text)
-                    price = parse_total_price(text)
-                    if price > 500:  # Filters out hourly rates
-                        matching_cars.append({"distance": dist, "price": price})
-            
+                    if dist < min_dist:
+                        min_dist = dist
+                        nearest_card = card
+
+            if nearest_card:
+                # Click on the nearest car card to go to details page
+                nearest_card.click()
+                page.wait_for_timeout(4000)
+
+                # Look for "Unlimited Kms Included" price element in details page
+                page_text = page.content()
+                
+                # Check for "Unlimited Kms Included" price block
+                unlimited_match = re.search(r'Unlimited\s*Kms\s*Included.*?₹\s*([\d,]+)', page_text, re.IGNORECASE | re.DOTALL)
+                
+                if unlimited_match:
+                    selected_price = int(unlimited_match.group(1).replace(',', ''))
+                else:
+                    # Fallback parsing on details page text
+                    prices = re.findall(r'₹\s*([\d,]+)', page.inner_text())
+                    valid_prices = [int(p.replace(',', '')) for p in prices if int(p.replace(',', '')) > 1000]
+                    selected_price = max(valid_prices) if valid_prices else 0
+
             browser.close()
     except Exception as e:
         print(f"Scraper error: {e}")
-
-    selected_price = 0
-    if matching_cars:
-        matching_cars.sort(key=lambda x: x["distance"])
-        selected_price = matching_cars[0]["price"]
 
     # Update Google Sheet
     post_data = {

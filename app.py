@@ -218,3 +218,20 @@ def fetch_and_update():
     except Exception:
         print("[ERROR] Failed to post result back to Google Sheet:")
         traceback.print_exc()
+
+# ================= FLASK SERVER ROUTES =================
+
+@app.route('/', methods=['GET'])
+def home():
+    return jsonify({"status": "live", "message": "Zoomcar Cloud Scraper Service is Active"}), 200
+
+@app.route('/trigger-check', methods=['GET', 'POST'])
+def trigger_check():
+    """Triggered by Google Apps Script button"""
+    thread = threading.Thread(target=fetch_and_update)
+    thread.start()
+    return jsonify({"status": "started", "message": "Scraper triggered successfully"}), 200
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port)

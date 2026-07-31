@@ -9,7 +9,7 @@ from playwright.sync_api import sync_playwright
 
 app = Flask(__name__)
 
-WEB_APP_URL = "https://script.google.com/macros/s/AKfycbXQ6GwU4o9l4xsBykQn8GsV8RtFYGHfOvGihBSvfMV8W9KR8K7a2ntYbOY5o7ZMuzhB8A/exec"
+WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzgsd39NlvLO8JSOpAnh-r52vTPDJPdnSlh0_3acioLnSt15qg1Squby-rPUwPZwwu-/exec"
 
 def date_to_epoch_ms(date_str, time_str):
     """

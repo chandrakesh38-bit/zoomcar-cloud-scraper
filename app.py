@@ -221,10 +221,15 @@ def fetch_and_update():
     except Exception as post_err:
         print(f"[ERROR] Failed to post result back to Google Sheet: {post_err}")
 
+@app.route('/', methods=['GET'])
+def health_check():
+    """Health check endpoint for Render Port Scanner"""
+    return jsonify({"status": "healthy", "service": "zoomcar-scraper"}), 200
+
 @app.route('/trigger-check', methods=['GET', 'POST'])
 def trigger():
     threading.Thread(target=fetch_and_update).start()
-    return jsonify({"status": "started", "message": "Exact Schema Scraper triggered successfully"})
+    return jsonify({"status": "started", "message": "Scraper triggered successfully"}), 200
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000))

@@ -37,11 +37,18 @@ def fetch_and_update():
         with sync_playwright() as p:
             browser = p.chromium.launch(
                 headless=True,
-                args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+                args=[
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-gpu',
+                    '--single-process'
+                ]
             )
-            page = browser.new_page()
+            context = browser.new_context()
+            page = context.new_page()
             page.goto(zoom_url, timeout=60000)
-            page.wait_for_timeout(3000)
+            page.wait_for_timeout(4000)
             
             cards = page.query_selector_all("div[class*='component-car-item'], div[class*='car-card'], div[class*='item']")
             if not cards:
@@ -70,13 +77,16 @@ def fetch_and_update():
         "revv_rate": "Not Found",
         "max_rate": selected_price
     }
-    requests.post(WEB_APP_URL, json=post_data)
+    try:
+        requests.post(WEB_APP_URL, json=post_data, timeout=10)
+    except Exception as e:
+        print(f"Error posting back: {e}")
 
 @app.route('/trigger-check', methods=['GET', 'POST'])
 def trigger():
     threading.Thread(target=fetch_and_update).start()
-    return jsonify({"status": "started", "message": "Scraper triggered in background"})
+    return jsonify({"status": "started", "message": "Scraper triggered successfully"})
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)

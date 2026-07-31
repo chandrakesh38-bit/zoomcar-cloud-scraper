@@ -38,7 +38,8 @@ def date_to_epoch_ms(val1, val2):
 
 def parse_exact_zoomcar_json(json_data, target_car):
     extracted_vehicles = []
-    
+    seen_candidates = []  # DEBUG: track every car-like object we saw, matched or not
+
     def find_car_objects(data):
         if isinstance(data, dict):
             if "car_info" in data or "amount" in data:
@@ -55,6 +56,16 @@ def parse_exact_zoomcar_json(json_data, target_car):
             amount = item.get("amount", {})
 
             car_name = str(car_info.get("name", "")).strip().lower()
+
+            # DEBUG: log every candidate object's keys/name, even non-matches
+            if len(seen_candidates) < 15:
+                seen_candidates.append({
+                    "name": car_name or "(no car_info.name)",
+                    "item_keys": list(item.keys()),
+                    "car_info_keys": list(car_info.keys()) if car_info else [],
+                    "amount_keys": list(amount.keys()) if amount else []
+                })
+
             if not car_name or target_car not in car_name:
                 continue
 
@@ -72,6 +83,13 @@ def parse_exact_zoomcar_json(json_data, target_car):
                     })
         except Exception:
             traceback.print_exc()
+
+    if not extracted_vehicles:
+        print(f"[DEBUG] No '{target_car}' match in this response. "
+              f"Candidate objects seen: {len(seen_candidates)}")
+        for c in seen_candidates:
+            print(f"[DEBUG]   name={c['name']!r} item_keys={c['item_keys']} "
+                  f"car_info_keys={c['car_info_keys']} amount_keys={c['amount_keys']}")
 
     return extracted_vehicles
 

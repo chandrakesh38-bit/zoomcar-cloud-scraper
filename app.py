@@ -1,13 +1,13 @@
 import os
 import re
 import requests
+import threading
 from flask import Flask, jsonify
 from playwright.sync_api import sync_playwright
 
 app = Flask(__name__)
 
-# Standalone Google Apps Script Web App URL
-WEB_APP_URL = "https://script.google.com/macros/s/AKfycbx9lWNCjUPqCpQwStvioWbfmqb6os25E8iRlXKFfWSrJXJyQGwXaWmQ9UREjUFgKN8D/exec"
+WEB_APP_URL = "https://script.google.com/macros/s/AKfycbXQ6GwU4o9l4xsBykQn8GsV8RtFYGHfOvGihBSvfMV8W9KR8K7a2ntYbOY5o7ZMuzhB8A/exec"
 
 def parse_distance(card_text):
     match = re.search(r'([\d\.]+)\s*km', card_text, re.IGNORECASE)
@@ -18,7 +18,6 @@ def parse_price(card_text):
     return int(match.group(1).replace(',', '')) if match else 0
 
 def fetch_and_update():
-    # 1. Fetch query from Google Sheet (with fallback safety)
     try:
         res = requests.get(WEB_APP_URL, timeout=10)
         data = res.json()
@@ -34,50 +33,49 @@ def fetch_and_update():
     zoom_url = f"https://www.zoomcar.com/in/mumbai/search?pickup_date={pickup_date}&pickup_time={pickup_time}&drop_date={drop_date}&drop_time={drop_time}"
 
     matching_cars = []
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=['--no-sandbox', '--disable-setuid-sandbox']
-        )
-        page = browser.new_page()
-        page.goto(zoom_url, timeout=60000)
-        page.wait_for_timeout(5000)
-        
-        cards = page.query_selector_all("div[class*='component-car-item'], div[class*='car-card'], div[class*='item']")
-        if not cards:
-            cards = page.query_selector_all("div")
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=True,
+                args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+            )
+            page = browser.new_page()
+            page.goto(zoom_url, timeout=60000)
+            page.wait_for_timeout(3000)
+            
+            cards = page.query_selector_all("div[class*='component-car-item'], div[class*='car-card'], div[class*='item']")
+            if not cards:
+                cards = page.query_selector_all("div")
 
-        for card in cards:
-            text = card.inner_text()
-            if car_name.lower() in text.lower() and '₹' in text:
-                dist = parse_distance(text)
-                price = parse_price(text)
-                if price > 0:
-                    matching_cars.append({"distance": dist, "price": price})
-        
-        browser.close()
+            for card in cards:
+                text = card.inner_text()
+                if car_name.lower() in text.lower() and '₹' in text:
+                    dist = parse_distance(text)
+                    price = parse_price(text)
+                    if price > 0:
+                        matching_cars.append({"distance": dist, "price": price})
+            
+            browser.close()
+    except Exception as e:
+        print(f"Scraper error: {e}")
 
     selected_price = 0
     if matching_cars:
         matching_cars.sort(key=lambda x: x["distance"])
         selected_price = matching_cars[0]["price"]
 
-    # 2. Update Google Sheet
+    # Update Google Sheet
     post_data = {
         "zoomcar_rate": selected_price,
         "revv_rate": "Not Found",
         "max_rate": selected_price
     }
     requests.post(WEB_APP_URL, json=post_data)
-    return selected_price
 
 @app.route('/trigger-check', methods=['GET', 'POST'])
 def trigger():
-    try:
-        rate = fetch_and_update()
-        return jsonify({"status": "success", "rate": rate})
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+    threading.Thread(target=fetch_and_update).start()
+    return jsonify({"status": "started", "message": "Scraper triggered in background"})
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))

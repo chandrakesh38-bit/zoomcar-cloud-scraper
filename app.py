@@ -145,7 +145,7 @@ def fetch_and_update():
     picks nearest car, and posts price back to Google Sheet.
     """
     print("\n========== fetch_and_update STARTED ==========")
-try:
+    try:
         res = requests.get(WEB_APP_URL, timeout=15)
         try:
             data = res.json()
@@ -218,17 +218,3 @@ try:
     except Exception:
         print("[ERROR] Failed to post result back to Google Sheet:")
         traceback.print_exc()
-
-@app.route('/', methods=['GET'])
-def health_check():
-    """Health check endpoint for Render Port Scanner"""
-    return jsonify({"status": "healthy", "service": "zoomcar-scraper"}), 200
-
-@app.route('/trigger-check', methods=['GET', 'POST'])
-def trigger():
-    threading.Thread(target=fetch_and_update).start()
-    return jsonify({"status": "started", "message": "Scraper triggered successfully"}), 200
-
-if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)

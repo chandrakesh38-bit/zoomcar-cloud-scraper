@@ -11,18 +11,19 @@ app = Flask(__name__)
 
 WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzgsd39NlvLO8JSOpAnh-r52vTPDJPdnSlh0_3acioLnSt15qg1Squby-rPUwPZwwu-/exec"
 
-def date_to_epoch_ms(date_str, time_str):
+def date_to_epoch_ms(val1, val2):
     """
-    Converts Google Apps Script date/time strings into JavaScript Epoch Milliseconds.
-    Handles reversed order like '08:00 13-Sep-2026' automatically.
+    Combines date and time regardless of order (Date Time or Time Date).
     """
-    combined_str = f"{date_str} {time_str}".strip()
+    combined_str = f"{val1} {val2}".strip()
     
     formats_to_try = [
-        "%d-%b-%Y %H:%M",  # 13-Sep-2026 08:00
-        "%H:%M %d-%b-%Y",  # 08:00 13-Sep-2026
-        "%Y-%m-%d %H:%M",  # 2026-09-13 08:00
-        "%H:%M %Y-%m-%d"   # 08:00 2026-09-13
+        "%d-%b-%Y %H:%M",
+        "%H:%M %d-%b-%Y",
+        "%d-%b-%Y %I:%M %p",
+        "%I:%M %p %d-%b-%Y",
+        "%Y-%m-%d %H:%M",
+        "%H:%M %Y-%m-%d"
     ]
     
     for fmt in formats_to_try:
@@ -32,7 +33,7 @@ def date_to_epoch_ms(date_str, time_str):
         except ValueError:
             continue
 
-    print(f"[WARN] Fallback used for date string: '{combined_str}'")
+    print(f"[WARN] Date parse fallback for string: '{combined_str}'")
     return int(datetime.now().timestamp() * 1000)
 
 def parse_exact_zoomcar_json(json_data, target_car):
@@ -145,16 +146,21 @@ def fetch_and_update():
         print(f"[ERROR] Failed to fetch parameters: {e}")
         data = {}
 
-    pickup_date = data.get('pickupDate') if isinstance(data, dict) and data.get('pickupDate') else '12-Sep-2026'
-    pickup_time = data.get('pickupTime') if isinstance(data, dict) and data.get('pickupTime') else '08:00'
-    drop_date = data.get('dropDate') if isinstance(data, dict) and data.get('dropDate') else '13-Sep-2026'
-    drop_time = data.get('dropTime') if isinstance(data, dict) and data.get('dropTime') else '08:00'
+    p_date = data.get('pickupDate', '12-Sep-2026')
+    p_time = data.get('pickupTime', '08:00')
+    d_date = data.get('dropDate', '13-Sep-2026')
+    d_time = data.get('dropTime', '08:00')
     
-    raw_car_name = (data.get('carName') if isinstance(data, dict) and data.get('carName') else 'Punch').strip().lower()
-    
-    if "nexon" in raw_car_name:
+    # Auto-detect if parameters are swapped from Apps Script
+    if "-" in str(p_time) and ":" in str(p_date):
+        p_date, p_time = p_time, p_date
+    if "-" in str(d_time) and ":" in str(d_date):
+        d_date, d_time = d_time, d_date
+
+    raw_car = str(data.get('carName', 'Punch')).strip().lower()
+    if "nexon" in raw_car:
         target_car = "nexon"
-    elif "punch" in raw_car_name:
+    elif "punch" in raw_car:
         target_car = "punch"
     else:
         target_car = "punch"
@@ -162,14 +168,14 @@ def fetch_and_update():
     found_vehicles = []
     try:
         print(f"[INFO] Attempt 1 for target model: '{target_car.upper()}'...")
-        found_vehicles = run_scraper_attempt(pickup_date, pickup_time, drop_date, drop_time, target_car)
+        found_vehicles = run_scraper_attempt(p_date, p_time, d_date, d_time, target_car)
     except Exception:
         traceback.print_exc()
 
     if not found_vehicles:
         print("[WARN] Retrying... Attempt 2...")
         try:
-            found_vehicles = run_scraper_attempt(pickup_date, pickup_time, drop_date, drop_time, target_car)
+            found_vehicles = run_scraper_attempt(p_date, p_time, d_date, d_time, target_car)
         except Exception:
             traceback.print_exc()
 
@@ -178,6 +184,7 @@ def fetch_and_update():
         found_vehicles.sort(key=lambda x: x["distance"])
         best_match = found_vehicles[0]
         selected_price = best_match["price"]
+        print(f"[SUCCESS] Best match fare: ₹{selected_price}")
 
     post_data = {
         "zoomcar_rate": selected_price,
@@ -189,8 +196,6 @@ def fetch_and_update():
         print(f"[SUCCESS] Updated Google Sheet via Webhook. Status code: {response.status_code}")
     except Exception:
         traceback.print_exc()
-
-# ================= FLASK SERVER ROUTES =================
 
 @app.route('/', methods=['GET'])
 def home():
